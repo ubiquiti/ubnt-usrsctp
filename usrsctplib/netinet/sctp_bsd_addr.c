@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD: head/sys/netinet/sctp_bsd_addr.c 333813 2018-05-18 20:13:34Z
 #if defined(__FreeBSD__)
 #include <sys/unistd.h>
 #endif
+#include <android_ifaddrs.h>
 
 /* Declare all of our malloc named types */
 #ifndef __Panda__
