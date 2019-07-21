@@ -205,6 +205,7 @@ sctp_os_timer_stop(sctp_os_timer_t *c)
 						  &sctp_os_timerwait_mtx, &halfSec) !=0 ) {
 					if(SCTP_BASE_VAR(deadlockSignal) != NULL)
 						SCTP_BASE_VAR(deadlockSignal)();
+					exit(1);
 				}
 #endif
 			}
