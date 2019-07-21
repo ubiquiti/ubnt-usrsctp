@@ -162,7 +162,9 @@ int
 sctp_os_timer_stop(sctp_os_timer_t *c)
 {
 	int wakeup_cookie;
+#if !defined (__Userspace_os_Windows)
 	static const struct timespec halfSec = {0,500000000};
+#endif
 
 	SCTP_TIMERQ_LOCK();
 	/*
