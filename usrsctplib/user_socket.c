@@ -80,7 +80,7 @@ extern int sctpconn_attach(struct socket *so, int proto, uint32_t vrf_id);
 void
 usrsctp_init(uint16_t port,
              int (*conn_output)(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df),
-             void (*debug_printf)(const char *format, ...))
+             void (*debug_printf)(const char *format, ...), void (*deadlockSignal)(void))
 {
 #if defined(__Userspace_os_Windows)
 #if defined(INET) || defined(INET6)
@@ -104,7 +104,7 @@ usrsctp_init(uint16_t port,
 	pthread_mutexattr_destroy(&mutex_attr);
 	pthread_cond_init(&accept_cond, NULL);
 #endif
-	sctp_init(port, conn_output, debug_printf);
+	sctp_init(port, conn_output, debug_printf, deadlockSignal);
 }
 
 

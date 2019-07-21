@@ -39,7 +39,7 @@ main(void)
 	int i;
 
 	for (i = 0; i < 10000; i++) {
-		usrsctp_init(0, NULL, NULL);
+		usrsctp_init(0, NULL, NULL, NULL);
 		while (usrsctp_finish() != 0) {
 #ifdef _WIN32
 			Sleep(1000);

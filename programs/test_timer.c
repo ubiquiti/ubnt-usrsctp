@@ -41,7 +41,7 @@ main(void)
 {
 	unsigned int i;
 
-	usrsctp_init(0, NULL, NULL);
+	usrsctp_init(0, NULL, NULL, NULL);
 	printf("Entering the loop\n");
 	for (i = 0; i < 1000000; i++) {
 		usrsctp_register_address(NULL);

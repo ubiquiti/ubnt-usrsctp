@@ -162,6 +162,7 @@ int
 sctp_os_timer_stop(sctp_os_timer_t *c)
 {
 	int wakeup_cookie;
+	static const struct timespec halfSec = {0,500000000};
 
 	SCTP_TIMERQ_LOCK();
 	/*
@@ -200,8 +201,11 @@ sctp_os_timer_stop(sctp_os_timer_t *c)
 							 &sctp_os_timerwait_mtx,
 							 INFINITE);
 #else
-				pthread_cond_wait(&sctp_os_timer_wait_cond,
-						  &sctp_os_timerwait_mtx);
+				if(pthread_cond_timedwait(&sctp_os_timer_wait_cond,
+						  &sctp_os_timerwait_mtx, &halfSec) !=0 ) {
+					if(SCTP_BASE_VAR(deadlockSignal) != NULL)
+						SCTP_BASE_VAR(deadlockSignal)();
+				}
 #endif
 			}
 			SCTP_TIMERWAIT_UNLOCK();
