@@ -106,7 +106,7 @@ sctp_os_timer_init(sctp_os_timer_t *c)
 }
 
 void
-sctp_os_timer_start(sctp_os_timer_t *c, int to_ticks, void (*ftn) (void *),
+sctp_os_timer_start(struct sctp_tcb *stcb, sctp_os_timer_t *c, int to_ticks, void (*ftn) (void *),
                     void *arg)
 {
 	/* paranoia */
@@ -150,6 +150,7 @@ sctp_os_timer_start(sctp_os_timer_t *c, int to_ticks, void (*ftn) (void *),
 	if (to_ticks <= 0)
 		to_ticks = 1;
 
+	c->stcb = stcb;
 	c->c_arg = arg;
 	c->c_flags = (SCTP_CALLOUT_ACTIVE | SCTP_CALLOUT_PENDING);
 	c->c_func = ftn;
@@ -195,6 +196,11 @@ sctp_os_timer_stop(sctp_os_timer_t *c)
 			 * in between the lock dance
 			 */
 			if (wakeup_cookie - sctp_os_timer_done_ctr > 0) {
+				//before doing the waiting, make sure the SCTB is not locked
+				//by us. If it is, then unlock it first
+				int doUnlockLock = sctp_userspace_thread_equal(tid, c->stcb->tcb_mtx_owner);
+				if(doUnlockLock)
+					SCTP_TCB_UNLOCK(c->stcb);
 #if defined (__Userspace_os_Windows)
 				SleepConditionVariableCS(&sctp_os_timer_wait_cond,
 							 &sctp_os_timerwait_mtx,
@@ -203,6 +209,8 @@ sctp_os_timer_stop(sctp_os_timer_t *c)
 				pthread_cond_wait(&sctp_os_timer_wait_cond,
 						  &sctp_os_timerwait_mtx);
 #endif
+				if(doUnlockLock)
+					SCTP_TCB_LOCK(c->stcb);
 			}
 			SCTP_TIMERWAIT_UNLOCK();
 		}
