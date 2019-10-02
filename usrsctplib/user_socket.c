@@ -39,6 +39,7 @@
 #include <netinet/sctp_sysctl.h>
 #include <netinet/sctp_input.h>
 #include <netinet/sctp_peeloff.h>
+#include <netinet/sctp_callout.h>
 #include <netinet/sctp_crc32.h>
 #ifdef INET6
 #include <netinet6/sctp6_var.h>
@@ -77,11 +78,7 @@ extern int sctp_sosend(struct socket *so, struct sockaddr *addr, struct uio *uio
 extern int sctp_attach(struct socket *so, int proto, uint32_t vrf_id);
 extern int sctpconn_attach(struct socket *so, int proto, uint32_t vrf_id);
 
-void
-usrsctp_init(uint16_t port,
-             int (*conn_output)(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df),
-             void (*debug_printf)(const char *format, ...))
-{
+static void init_sync(void) {
 #if defined(__Userspace_os_Windows)
 #if defined(INET) || defined(INET6)
 	WSADATA wsaData;
@@ -104,7 +101,25 @@ usrsctp_init(uint16_t port,
 	pthread_mutexattr_destroy(&mutex_attr);
 	pthread_cond_init(&accept_cond, NULL);
 #endif
-	sctp_init(port, conn_output, debug_printf);
+}
+
+void
+usrsctp_init(uint16_t port,
+             int (*conn_output)(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df),
+             void (*debug_printf)(const char *format, ...))
+{
+	init_sync();
+	sctp_init(port, conn_output, debug_printf, 1);
+}
+
+
+void
+usrsctp_init_nothreads(uint16_t port,
+		       int (*conn_output)(void *addr, void *buffer, size_t length, uint8_t tos, uint8_t set_df),
+		       void (*debug_printf)(const char *format, ...))
+{
+	init_sync();
+	sctp_init(port, conn_output, debug_printf, 0);
 }
 
 
@@ -1564,8 +1579,6 @@ sowakeup(struct socket *so, struct sockbuf *sb)
 #endif
 	}
 	SOCKBUF_UNLOCK(sb);
-	/*__Userspace__ what todo about so_upcall?*/
-
 }
 #else /* kernel version for reference */
 /*
@@ -2406,6 +2419,20 @@ usrsctp_getsockopt(struct socket *so, int level, int option_name,
 				*option_len = (socklen_t)sizeof(struct linger);
 				return (0);
 			}
+			break;
+		case SO_ERROR:
+			if (*option_len < (socklen_t)sizeof(int)) {
+				errno = EINVAL;
+				return (-1);
+			} else {
+				int *intval;
+
+				intval = (int *)option_value;
+				*intval = so->so_error;
+				*option_len = (socklen_t)sizeof(int);
+				return (0);
+			}
+			break;
 		default:
 			errno = EINVAL;
 			return (-1);
@@ -3138,14 +3165,14 @@ sctp_userspace_ip_output(int *result, struct mbuf *o_pak,
 	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp) != -1)) {
 		if (WSASendTo(SCTP_BASE_VAR(userspace_rawsctp), (LPWSABUF) send_iovec, iovcnt, &win_sent_len, win_msg_hdr.dwFlags, win_msg_hdr.name, (int) win_msg_hdr.namelen, NULL, NULL) != 0) {
 			*result = WSAGetLastError();
-		} else if (win_sent_len != send_len) {
+		} else if ((int)win_sent_len != send_len) {
 			*result = WSAGetLastError();
 		}
 	}
 	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp) != -1)) {
 		if (WSASendTo(SCTP_BASE_VAR(userspace_udpsctp), (LPWSABUF) send_iovec, iovcnt, &win_sent_len, win_msg_hdr.dwFlags, win_msg_hdr.name, (int) win_msg_hdr.namelen, NULL, NULL) != 0) {
 			*result = WSAGetLastError();
-		} else if (win_sent_len != send_len) {
+		} else if ((int)win_sent_len != send_len) {
 			*result = WSAGetLastError();
 		}
 	}
@@ -3292,14 +3319,14 @@ void sctp_userspace_ip6_output(int *result, struct mbuf *o_pak,
 	if ((!use_udp_tunneling) && (SCTP_BASE_VAR(userspace_rawsctp6) != -1)) {
 		if (WSASendTo(SCTP_BASE_VAR(userspace_rawsctp6), (LPWSABUF) send_iovec, iovcnt, &win_sent_len, win_msg_hdr.dwFlags, win_msg_hdr.name, (int) win_msg_hdr.namelen, NULL, NULL) != 0) {
 			*result = WSAGetLastError();
-		} else if (win_sent_len != send_len) {
+		} else if ((int)win_sent_len != send_len) {
 			*result = WSAGetLastError();
 		}
 	}
 	if ((use_udp_tunneling) && (SCTP_BASE_VAR(userspace_udpsctp6) != -1)) {
 		if (WSASendTo(SCTP_BASE_VAR(userspace_udpsctp6), (LPWSABUF) send_iovec, iovcnt, &win_sent_len, win_msg_hdr.dwFlags, win_msg_hdr.name, (int) win_msg_hdr.namelen, NULL, NULL) != 0) {
 			*result = WSAGetLastError();
-		} else if (win_sent_len != send_len) {
+		} else if ((int)win_sent_len != send_len) {
 			*result = WSAGetLastError();
 		}
 	}
@@ -3378,9 +3405,15 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 #ifdef _WIN32
 	ftime(&tb);
 	localtime_s(&t, &tb.time);
+#if defined(__MINGW32__)
+	snprintf(dump_buf, PREAMBLE_LENGTH + 1, PREAMBLE_FORMAT,
+	            outbound ? 'O' : 'I',
+	            t.tm_hour, t.tm_min, t.tm_sec, (long)(1000 * tb.millitm));
+#else
 	_snprintf_s(dump_buf, PREAMBLE_LENGTH + 1, PREAMBLE_LENGTH, PREAMBLE_FORMAT,
 	            outbound ? 'O' : 'I',
 	            t.tm_hour, t.tm_min, t.tm_sec, (long)(1000 * tb.millitm));
+#endif
 #else
 	gettimeofday(&tv, NULL);
 	sec = (time_t)tv.tv_sec;
@@ -3390,7 +3423,7 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 	         t.tm_hour, t.tm_min, t.tm_sec, (long)tv.tv_usec);
 #endif
 	pos += PREAMBLE_LENGTH;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(__MINGW32__)
 	strncpy_s(dump_buf + pos, strlen(HEADER) + 1, HEADER, strlen(HEADER));
 #else
 	strcpy(dump_buf + pos, HEADER);
@@ -3407,7 +3440,7 @@ usrsctp_dumppacket(const void *buf, size_t len, int outbound)
 		dump_buf[pos++] = low < 10 ? '0' + low : 'a' + (low - 10);
 		dump_buf[pos++] = ' ';
 	}
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(__MINGW32__)
 	strncpy_s(dump_buf + pos, strlen(TRAILER) + 1, TRAILER, strlen(TRAILER));
 #else
 	strcpy(dump_buf + pos, TRAILER);
@@ -3493,6 +3526,11 @@ usrsctp_conninput(void *addr, const void *buffer, size_t length, uint8_t ecn_bit
 		sctp_m_freem(m);
 	}
 	return;
+}
+
+void usrsctp_handle_timers(int delta)
+{
+	sctp_handle_tick(delta);
 }
 
 int
