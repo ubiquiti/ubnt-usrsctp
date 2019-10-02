@@ -1032,7 +1032,8 @@ struct sockaddr_conn {
 typedef void *(*start_routine_t)(void *);
 
 extern int
-sctp_userspace_thread_create(userland_thread_t *thread, start_routine_t start_routine);
+sctp_userspace_thread_create_tracked(userland_thread_t *thread, start_routine_t start_routine, const char *pFile, int line);
+#define sctp_userspace_thread_create(t,r) sctp_userspace_thread_create_tracked(t,r,__FILE__,__LINE__)
 
 void
 sctp_userspace_set_threadname(const char *name);

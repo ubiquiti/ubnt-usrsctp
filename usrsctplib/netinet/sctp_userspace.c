@@ -59,12 +59,13 @@ sctp_create_thread_adapter(void *arg) {
 }
 
 int
-sctp_userspace_thread_create(userland_thread_t *thread, start_routine_t start_routine)
+sctp_userspace_thread_create_tracked(userland_thread_t *thread, start_routine_t start_routine, const char *pFile, int line)
 {
 	*thread = CreateThread(NULL, 0, sctp_create_thread_adapter,
 			       (void *)start_routine, 0, NULL);
 	if (*thread == NULL)
 		return GetLastError();
+	fprintf(stderr,"thread created from %s:%d\n",pFile,line);
 	return 0;
 }
 
@@ -87,8 +88,9 @@ sctp_userspace_thread_equal(userland_thread_id_t t1, userland_thread_id_t t2)
 
 #else
 int
-sctp_userspace_thread_create(userland_thread_t *thread, start_routine_t start_routine)
+sctp_userspace_thread_create_tracked(userland_thread_t *thread, start_routine_t start_routine, const char *pFile, int line)
 {
+	fprintf(stderr,"thread created from %s:%d\n",pFile,line);
 	return pthread_create(thread, NULL, start_routine, NULL);
 }
 
