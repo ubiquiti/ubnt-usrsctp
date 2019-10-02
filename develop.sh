@@ -2,8 +2,8 @@
 
 set -e
 
-cmake .
-make -j64 DESTDIR=/tmp/bla install
+cmake -Dsctp_single_thread=ON .
+make VERBOSE=1 -j64 DESTDIR=/tmp/bla install
 
 rsync -av --delete-during /tmp/bla/usr/local/ /Users/shiretu/work/evostream/builders/cmake/external_libs/usrsctp
 rsync -av /tmp/bla/usr/local/ /Users/shiretu/work/evostream/builders/nodejs/externals/x86_64

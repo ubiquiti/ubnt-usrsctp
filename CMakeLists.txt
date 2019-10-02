@@ -57,13 +57,18 @@ if (sctp_debug)
 	add_definitions(-DSCTP_DEBUG)
 endif ()
 
+option(sctp_single_thread "Compile the library without threading support" 0)
+if (sctp_single_thread)
+	add_definitions(-DSINGLE_THREAD)
+endif ()
+
 option(sctp_inet "Support IPv4" 1)
-if (sctp_inet)
+if (sctp_inet AND NOT sctp_single_thread)
 	add_definitions(-DINET)
 endif ()
 
 option(sctp_inet6 "Support IPv6" 1)
-if (sctp_inet6)
+if (sctp_inet6 AND NOT sctp_single_thread)
 	add_definitions(-DINET6)
 endif ()
 
