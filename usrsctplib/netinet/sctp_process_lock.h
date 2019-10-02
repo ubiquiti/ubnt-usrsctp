@@ -230,29 +230,29 @@
 
 #define SCTP_TCB_LOCK_INIT(_tcb) do { \
 	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	InitializeCriticalSection(&(_tcb)->tcb_mtx1); \
+	InitializeCriticalSection(&(_tcb)->tcb_mtx); \
 }while(0)
 #define SCTP_TCB_LOCK_DESTROY(_tcb) do { \
 	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	DeleteCriticalSection(&(_tcb)->tcb_mtx1); \
+	DeleteCriticalSection(&(_tcb)->tcb_mtx); \
 } while(0)
 #ifdef SCTP_LOCK_LOGGING
 #define SCTP_TCB_LOCK(_tcb) do {						\
 	if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LOCK_LOGGING_ENABLE)	\
 		sctp_log_lock(_tcb->sctp_ep, _tcb, SCTP_LOG_LOCK_TCB);		\
-	EnterCriticalSection(&(_tcb)->tcb_mtx1);					\
+	EnterCriticalSection(&(_tcb)->tcb_mtx);					\
 	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while (0)
 #else
 #define SCTP_TCB_LOCK(_tcb) do { \
-	EnterCriticalSection(&(_tcb)->tcb_mtx1); \
+	EnterCriticalSection(&(_tcb)->tcb_mtx); \
 	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while(0)
 #endif
-#define SCTP_TCB_TRYLOCK(_tcb) 	(TryEnterCriticalSection(&(_tcb)->tcb_mtx1) && (!sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner)))
+#define SCTP_TCB_TRYLOCK(_tcb) 	(TryEnterCriticalSection(&(_tcb)->tcb_mtx) && (!sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner)))
 #define SCTP_TCB_UNLOCK(_tcb) do { \
 	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	LeaveCriticalSection(&(_tcb)->tcb_mtx1); \
+	LeaveCriticalSection(&(_tcb)->tcb_mtx); \
 } while(0)
 #define SCTP_TCB_LOCK_ASSERT(_tcb)
 
@@ -446,54 +446,54 @@
 
 #define SCTP_TCB_LOCK_INIT(_tcb) do { \
 	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	(void)pthread_mutex_init(&(_tcb)->tcb_mtx1, &SCTP_BASE_VAR(mtx_attr)); \
+	(void)pthread_mutex_init(&(_tcb)->tcb_mtx, &SCTP_BASE_VAR(mtx_attr)); \
 }while(0)
 #define SCTP_TCB_LOCK_DESTROY(_tcb) do { \
 	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	(void)pthread_mutex_destroy(&(_tcb)->tcb_mtx1); \
+	(void)pthread_mutex_destroy(&(_tcb)->tcb_mtx); \
 } while(0)
 #ifdef INVARIANTS
 #ifdef SCTP_LOCK_LOGGING
 #define SCTP_TCB_LOCK(_tcb) do {									\
 	if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LOCK_LOGGING_ENABLE) 				\
 		sctp_log_lock(_tcb->sctp_ep, _tcb, SCTP_LOG_LOCK_TCB);					\
-	KASSERT(pthread_mutex_lock(&(_tcb)->tcb_mtx1) == 0, ("%s: tcb_mtx1 already locked", __func__))	\
+	KASSERT(pthread_mutex_lock(&(_tcb)->tcb_mtx) == 0, ("%s: tcb_mtx already locked", __func__))	\
 	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while (0)
 #else
 #define SCTP_TCB_LOCK(_tcb) do { \
-	KASSERT(pthread_mutex_lock(&(_tcb)->tcb_mtx1) == 0, ("%s: tcb_mtx1 already locked", __func__)) \
+	KASSERT(pthread_mutex_lock(&(_tcb)->tcb_mtx) == 0, ("%s: tcb_mtx already locked", __func__)) \
 	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while(0)
 #endif
 #define SCTP_TCB_UNLOCK(_tcb) do { \
 	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	KASSERT(pthread_mutex_unlock(&(_tcb)->tcb_mtx1) == 0, ("%s: tcb_mtx1 not locked", __func__)) \
+	KASSERT(pthread_mutex_unlock(&(_tcb)->tcb_mtx) == 0, ("%s: tcb_mtx not locked", __func__)) \
 } while(0)
 #else
 #ifdef SCTP_LOCK_LOGGING
 #define SCTP_TCB_LOCK(_tcb) do {						\
 	if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LOCK_LOGGING_ENABLE) 	\
 		sctp_log_lock(_tcb->sctp_ep, _tcb, SCTP_LOG_LOCK_TCB);		\
-	(void)pthread_mutex_lock(&(_tcb)->tcb_mtx1);				\
+	(void)pthread_mutex_lock(&(_tcb)->tcb_mtx);				\
 	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while (0)
 #else
 #define SCTP_TCB_LOCK(_tcb) do { \
-	(void)pthread_mutex_lock(&(_tcb)->tcb_mtx1); \
+	(void)pthread_mutex_lock(&(_tcb)->tcb_mtx); \
 	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while(0)
 #endif
 #define SCTP_TCB_UNLOCK(_tcb) do { \
 	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	(void)pthread_mutex_unlock(&(_tcb)->tcb_mtx1); \
+	(void)pthread_mutex_unlock(&(_tcb)->tcb_mtx); \
 } while(0)
 #endif
 #define SCTP_TCB_LOCK_ASSERT(_tcb) do { \
-	KASSERT(pthread_mutex_trylock(&(_tcb)->tcb_mtx1) == EBUSY, ("%s: tcb_mtx1 not locked", __func__)) \
+	KASSERT(pthread_mutex_trylock(&(_tcb)->tcb_mtx) == EBUSY, ("%s: tcb_mtx not locked", __func__)) \
 	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while(0)
-#define SCTP_TCB_TRYLOCK(_tcb) ((!pthread_mutex_trylock(&(_tcb)->tcb_mtx1)) && (!sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner)))
+#define SCTP_TCB_TRYLOCK(_tcb) ((!pthread_mutex_trylock(&(_tcb)->tcb_mtx)) && (!sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner)))
 #endif
 
 #endif /* SCTP_PER_SOCKET_LOCKING */
