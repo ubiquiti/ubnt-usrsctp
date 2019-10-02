@@ -2378,7 +2378,7 @@ sctp_timer_start(int t_type, struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 #ifndef __Panda__
 	tmr->ticks = sctp_get_tick_count();
 #endif
-	(void)SCTP_OS_TIMER_START(&tmr->timer, to_ticks, sctp_timeout_handler, tmr);
+	(void)SCTP_OS_TIMER_START(stcb, &tmr->timer, to_ticks, sctp_timeout_handler, tmr);
 	return;
 }
 

@@ -642,6 +642,7 @@ struct sctp_tcb {
 #elif defined(SCTP_PROCESS_LEVEL_LOCKS)
 	userland_mutex_t tcb_mtx;
 	userland_mutex_t tcb_send_mtx;
+	userland_thread_id_t tcb_mtx_owner;
 #elif defined(__APPLE__)
 	lck_mtx_t* tcb_mtx;
 	lck_mtx_t* tcb_send_mtx;

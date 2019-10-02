@@ -87,6 +87,7 @@ programs/tsctp_upcall
 callgrind.out*
 
 # cmake build
+install_manifest.txt
 /build
 CMakeCache.txt
 CMakeFiles
