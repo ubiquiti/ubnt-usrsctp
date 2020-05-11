@@ -75,9 +75,7 @@ uint32_t sctp_get_tick_count(void);
 
 TAILQ_HEAD(calloutlist, sctp_callout);
 
-struct sctp_tcb;
 struct sctp_callout {
-	struct sctp_tcb *stcb;
 	TAILQ_ENTRY(sctp_callout) tqe;
 	uint32_t c_time;		/* ticks to the event */
 	void *c_arg;		/* function argument */

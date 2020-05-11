@@ -120,7 +120,6 @@ sctp_os_timer_start(sctp_os_timer_t *c, uint32_t to_ticks, void (*ftn) (void *),
 	if (to_ticks == 0)
 		to_ticks = 1;
 
-	c->stcb = stcb;
 	c->c_arg = arg;
 	c->c_flags = (SCTP_CALLOUT_ACTIVE | SCTP_CALLOUT_PENDING);
 	c->c_func = ftn;
