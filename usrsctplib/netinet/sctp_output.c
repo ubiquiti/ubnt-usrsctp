@@ -34,7 +34,7 @@
 
 #ifdef __FreeBSD__
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/sys/netinet/sctp_output.c 351654 2019-09-01 10:09:53Z tuexen $");
+__FBSDID("$FreeBSD: head/sys/netinet/sctp_output.c 360869 2020-05-10 10:03:10Z tuexen $");
 #endif
 
 #include <netinet/sctp_os.h>
@@ -56,6 +56,9 @@ __FBSDID("$FreeBSD: head/sys/netinet/sctp_output.c 351654 2019-09-01 10:09:53Z t
 #include <netinet/sctp_bsd_addr.h>
 #include <netinet/sctp_input.h>
 #include <netinet/sctp_crc32.h>
+#if defined(__FreeBSD__)
+#include <netinet/sctp_kdtrace.h>
+#endif
 #if defined(__Userspace_os_Linux)
 #define __FAVOR_BSD    /* (on Ubuntu at least) enables UDP header field names like BSD in RFC 768 */
 #endif
@@ -72,7 +75,6 @@ __FBSDID("$FreeBSD: head/sys/netinet/sctp_output.c 351654 2019-09-01 10:09:53Z t
 #include <netinet/udp_var.h>
 #endif
 #include <machine/in_cksum.h>
-#include <netinet/in_kdtrace.h>
 #endif
 #if defined(__Userspace__) && defined(INET6)
 #include <netinet6/sctp6_var.h>
@@ -6688,11 +6690,11 @@ sctp_prune_prsctp(struct sctp_tcb *stcb,
 				 * This one is PR-SCTP AND buffer space
 				 * limited type
 				 */
-				if (chk->rec.data.timetodrop.tv_sec >= (long)srcv->sinfo_timetolive) {
+				if (chk->rec.data.timetodrop.tv_sec > (long)srcv->sinfo_timetolive) {
 					/*
 					 * Lower numbers equates to higher
 					 * priority so if the one we are
-					 * looking at has a larger or equal
+					 * looking at has a larger
 					 * priority we want to drop the data
 					 * and NOT retransmit it.
 					 */
@@ -6723,7 +6725,7 @@ sctp_prune_prsctp(struct sctp_tcb *stcb,
 		TAILQ_FOREACH_SAFE(chk, &asoc->send_queue, sctp_next, nchk) {
 			/* Here we must move to the sent queue and mark */
 			if (PR_SCTP_BUF_ENABLED(chk->flags)) {
-				if (chk->rec.data.timetodrop.tv_sec >= (long)srcv->sinfo_timetolive) {
+				if (chk->rec.data.timetodrop.tv_sec > (long)srcv->sinfo_timetolive) {
 					if (chk->data) {
 						/*
 						 * We release the book_size
@@ -7220,7 +7222,7 @@ sctp_sendall_iterator(struct sctp_inpcb *inp, struct sctp_tcb *stcb, void *ptr,
 					sctp_timer_start(SCTP_TIMER_TYPE_SHUTDOWN, stcb->sctp_ep, stcb,
 							 net);
 					sctp_timer_start(SCTP_TIMER_TYPE_SHUTDOWNGUARD, stcb->sctp_ep, stcb,
-							 asoc->primary_destination);
+					                 NULL);
 					added_control = 1;
 					do_chunk_output = 0;
 				}
@@ -7260,7 +7262,7 @@ sctp_sendall_iterator(struct sctp_inpcb *inp, struct sctp_tcb *stcb, void *ptr,
 						goto no_chunk_output;
 					}
 					sctp_timer_start(SCTP_TIMER_TYPE_SHUTDOWNGUARD, stcb->sctp_ep, stcb,
-							 asoc->primary_destination);
+					                 NULL);
 				}
 			}
 
@@ -7372,14 +7374,14 @@ sctp_sendall(struct sctp_inpcb *inp, struct uio *uio, struct mbuf *m,
 	}
 #if defined(__APPLE__)
 #if defined(APPLE_LEOPARD)
-	if (uio->uio_resid > SCTP_MAX_SENDALL_LIMIT) {
+	if (uio->uio_resid > SCTP_BASE_SYSCTL(sctp_sendall_limit)) {
 #else
-	if (uio_resid(uio) > SCTP_MAX_SENDALL_LIMIT) {
+	if (uio_resid(uio) > SCTP_BASE_SYSCTL(sctp_sendall_limit)) {
 #endif
 #else
-	if (uio->uio_resid > SCTP_MAX_SENDALL_LIMIT) {
+	if (uio->uio_resid > (ssize_t)SCTP_BASE_SYSCTL(sctp_sendall_limit)) {
 #endif
-		/* You must be less than the max! */
+		/* You must not be larger than the limit! */
 		return (EMSGSIZE);
 	}
 	SCTP_MALLOC(ca, struct sctp_copy_all *, sizeof(struct sctp_copy_all),
@@ -7439,7 +7441,7 @@ sctp_sendall(struct sctp_inpcb *inp, struct uio *uio, struct mbuf *m,
 				     (void *)ca, 0,
 				     sctp_sendall_completes, inp, 1);
 	if (ret) {
-		SCTP_PRINTF("Failed to initiate iterator for sendall\n");
+		inp->sctp_flags &= ~SCTP_PCB_FLAGS_SND_ITERATOR_UP;
 		SCTP_FREE(ca, SCTP_M_COPYAL);
 		SCTP_LTRACE_ERR_RET_PKT(m, inp, NULL, NULL, SCTP_FROM_SCTP_OUTPUT, EFAULT);
 		return (EFAULT);
@@ -8274,7 +8276,11 @@ sctp_fill_outqueue(struct sctp_tcb *stcb,
 		}
 		strq = stcb->asoc.ss_functions.sctp_ss_select_stream(stcb, net, asoc);
 		total_moved += moved;
-		space_left -= moved;
+		if (space_left >= moved) {
+			space_left -= moved;
+		} else {
+			space_left = 0;
+		}
 		if (space_left >= SCTP_DATA_CHUNK_OVERHEAD(stcb)) {
 			space_left -= SCTP_DATA_CHUNK_OVERHEAD(stcb);
 		} else {
@@ -8377,8 +8383,8 @@ sctp_med_chunk_output(struct sctp_inpcb *inp,
 	int bundle_at, ctl_cnt, no_data_chunks, eeor_mode;
 	unsigned int mtu, r_mtu, omtu, mx_mtu, to_out;
 	int tsns_sent = 0;
-	uint32_t auth_offset = 0;
-	struct sctp_auth_chunk *auth = NULL;
+	uint32_t auth_offset;
+	struct sctp_auth_chunk *auth;
 	uint16_t auth_keyid;
 	int override_ok = 1;
 	int skip_fill_up = 0;
@@ -8576,6 +8582,8 @@ again_one_more_time:
 		}
 		bundle_at = 0;
 		endoutchain = outchain = NULL;
+		auth = NULL;
+		auth_offset = 0;
 		no_fragmentflg = 1;
 		one_chunk = 0;
 		if (net->dest_state & SCTP_ADDR_UNCONFIRMED) {
@@ -8957,7 +8965,7 @@ again_one_more_time:
 						/* turn off the timer */
 						if (SCTP_OS_TIMER_PENDING(&stcb->asoc.dack_timer.timer)) {
 							sctp_timer_stop(SCTP_TIMER_TYPE_RECV,
-									inp, stcb, net,
+							                inp, stcb, NULL,
 							                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_1);
 						}
 					}
@@ -9569,8 +9577,7 @@ sctp_send_cookie_echo(struct mbuf *m,
 				pad = 4 - pad;
 			}
 			if (pad > 0) {
-				cookie = sctp_pad_lastmbuf(cookie, pad, NULL);
-				if (cookie == NULL) {
+				if (sctp_pad_lastmbuf(cookie, pad, NULL) == NULL) {
 					return (-8);
 				}
 			}
@@ -10474,7 +10481,7 @@ sctp_chunk_retransmission(struct sctp_inpcb *inp,
 						 * t3-expiring.
 						 */
 						sctp_timer_stop(SCTP_TIMER_TYPE_SEND, inp, stcb, net,
-								SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_2);
+						                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_2);
 						sctp_timer_start(SCTP_TIMER_TYPE_SEND, inp, stcb, net);
 					}
 				}
@@ -10600,7 +10607,8 @@ do_it_again:
 	 */
 	if (SCTP_OS_TIMER_PENDING(&stcb->asoc.dack_timer.timer)) {
 		sctp_send_sack(stcb, so_locked);
-		(void)SCTP_OS_TIMER_STOP(&stcb->asoc.dack_timer.timer);
+		sctp_timer_stop(SCTP_TIMER_TYPE_RECV, stcb->sctp_ep, stcb, NULL,
+		                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_3);
 	}
 	while (asoc->sent_queue_retran_cnt) {
 		/*-
@@ -11146,7 +11154,7 @@ sctp_send_sack(struct sctp_tcb *stcb, int so_locked
 			if (stcb->asoc.delayed_ack) {
 				sctp_timer_stop(SCTP_TIMER_TYPE_RECV,
 				                stcb->sctp_ep, stcb, NULL,
-				                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_3);
+				                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_4);
 				sctp_timer_start(SCTP_TIMER_TYPE_RECV,
 				    stcb->sctp_ep, stcb, NULL);
 			} else {
@@ -11215,7 +11223,7 @@ sctp_send_sack(struct sctp_tcb *stcb, int so_locked
 		if (stcb->asoc.delayed_ack) {
 			sctp_timer_stop(SCTP_TIMER_TYPE_RECV,
 			                stcb->sctp_ep, stcb, NULL,
-			                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_4);
+			                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_5);
 			sctp_timer_start(SCTP_TIMER_TYPE_RECV,
 			    stcb->sctp_ep, stcb, NULL);
 		} else {
@@ -11261,7 +11269,7 @@ sctp_send_sack(struct sctp_tcb *stcb, int so_locked
 		if (highest_tsn > asoc->mapping_array_base_tsn) {
 			siz = (((highest_tsn - asoc->mapping_array_base_tsn) + 1) + 7) / 8;
 		} else {
-			siz = (((MAX_TSN - highest_tsn) + 1) + highest_tsn + 7) / 8;
+			siz = (((MAX_TSN - asoc->mapping_array_base_tsn) + 1) + highest_tsn + 7) / 8;
 		}
 	} else {
 		sack = NULL;
@@ -13527,6 +13535,9 @@ sctp_lower_sosend(struct socket *so,
 #endif
 	)
 {
+#if defined(__FreeBSD__)
+	struct epoch_tracker et;
+#endif
 	ssize_t sndlen = 0, max_len, local_add_more;
 	int error, len;
 	struct mbuf *top = NULL;
@@ -13629,8 +13640,8 @@ sctp_lower_sosend(struct socket *so,
 		sndlen = SCTP_HEADER_LEN(i_pak);
 #endif
 	}
-	SCTPDBG(SCTP_DEBUG_OUTPUT1, "Send called addr:%p send length %zu\n",
-		(void *)addr,
+	SCTPDBG(SCTP_DEBUG_OUTPUT1, "Send called addr:%p send length %zd\n",
+	        (void *)addr,
 	        sndlen);
 #ifdef __Panda__
 	if (i_control) {
@@ -13866,7 +13877,7 @@ sctp_lower_sosend(struct socket *so,
 			if (control) {
 				if (sctp_process_cmsgs_for_init(stcb, control, &error)) {
 					sctp_free_assoc(inp, stcb, SCTP_PCBFREE_FORCE,
-					                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_5);
+					                SCTP_FROM_SCTP_OUTPUT + SCTP_LOC_6);
 					hold_tcblock = 0;
 					stcb = NULL;
 					goto out_unlocked;
@@ -14116,7 +14127,13 @@ sctp_lower_sosend(struct socket *so,
 		atomic_add_int(&stcb->asoc.refcnt, -1);
 		free_cnt_applied = 0;
 		/* release this lock, otherwise we hang on ourselves */
+#if defined(__FreeBSD__)
+		NET_EPOCH_ENTER(et);
+#endif
 		sctp_abort_an_association(stcb->sctp_ep, stcb, mm, SCTP_SO_LOCKED);
+#if defined(__FreeBSD__)
+		NET_EPOCH_EXIT(et);
+#endif
 		/* now relock the stcb so everything is sane */
 		hold_tcblock = 0;
 		stcb = NULL;
@@ -14462,7 +14479,13 @@ skip_preblock:
 					/* a collision took us forward? */
 					queue_only = 0;
 				} else {
+#if defined(__FreeBSD__)
+					NET_EPOCH_ENTER(et);
+#endif
 					sctp_send_initiate(inp, stcb, SCTP_SO_LOCKED);
+#if defined(__FreeBSD__)
+					NET_EPOCH_EXIT(et);
+#endif
 					SCTP_SET_STATE(stcb, SCTP_STATE_COOKIE_WAIT);
 					queue_only = 1;
 				}
@@ -14520,6 +14543,9 @@ skip_preblock:
 				 * the input via the net is happening
 				 * and I don't need to start output :-D
 				 */
+#if defined(__FreeBSD__)
+				NET_EPOCH_ENTER(et);
+#endif
 				if (hold_tcblock == 0) {
 					if (SCTP_TCB_TRYLOCK(stcb)) {
 						hold_tcblock = 1;
@@ -14532,6 +14558,9 @@ skip_preblock:
 							  stcb,
 							  SCTP_OUTPUT_FROM_USR_SEND, SCTP_SO_LOCKED);
 				}
+#if defined(__FreeBSD__)
+				NET_EPOCH_EXIT(et);
+#endif
 			}
 			if (hold_tcblock == 1) {
 				SCTP_TCB_UNLOCK(stcb);
@@ -14692,7 +14721,7 @@ dataless_eof:
 				sctp_timer_start(SCTP_TIMER_TYPE_SHUTDOWN, stcb->sctp_ep, stcb,
 				                 netp);
 				sctp_timer_start(SCTP_TIMER_TYPE_SHUTDOWNGUARD, stcb->sctp_ep, stcb,
-				                 asoc->primary_destination);
+				                 NULL);
 			}
 		} else {
 			/*-
@@ -14731,15 +14760,21 @@ dataless_eof:
 					         "%s:%d at %s", __FILE__, __LINE__, __func__);
 					op_err = sctp_generate_cause(SCTP_BASE_SYSCTL(sctp_diag_info_code),
 					                             msg);
+#if defined(__FreeBSD__)
+					NET_EPOCH_ENTER(et);
+#endif
 					sctp_abort_an_association(stcb->sctp_ep, stcb,
 					                          op_err, SCTP_SO_LOCKED);
+#if defined(__FreeBSD__)
+					NET_EPOCH_EXIT(et);
+#endif
 					/* now relock the stcb so everything is sane */
 					hold_tcblock = 0;
 					stcb = NULL;
 					goto out;
 				}
 				sctp_timer_start(SCTP_TIMER_TYPE_SHUTDOWNGUARD, stcb->sctp_ep, stcb,
-				                 asoc->primary_destination);
+				                 NULL);
 				sctp_feature_off(inp, SCTP_PCB_FLAGS_NODELAY);
 			}
 		}
@@ -14757,7 +14792,13 @@ skip_out_eof:
 			/* a collision took us forward? */
 			queue_only = 0;
 		} else {
+#if defined(__FreeBSD__)
+			NET_EPOCH_ENTER(et);
+#endif
 			sctp_send_initiate(inp, stcb, SCTP_SO_LOCKED);
+#if defined(__FreeBSD__)
+			NET_EPOCH_EXIT(et);
+#endif
 			SCTP_SET_STATE(stcb, SCTP_STATE_COOKIE_WAIT);
 			queue_only = 1;
 		}
@@ -14803,6 +14844,9 @@ skip_out_eof:
 		               stcb->asoc.total_flight,
 		               stcb->asoc.chunks_on_out_queue, stcb->asoc.total_flight_count);
 	}
+#if defined(__FreeBSD__)
+	NET_EPOCH_ENTER(et);
+#endif
 	if ((queue_only == 0) && (nagle_applies == 0) && (stcb->asoc.peers_rwnd && un_sent)) {
 		/* we can attempt to send too. */
 		if (hold_tcblock == 0) {
@@ -14835,6 +14879,9 @@ skip_out_eof:
 		(void)sctp_med_chunk_output(inp, stcb, &stcb->asoc, &num_out,
 		                            &reason, 1, 1, &now, &now_filled, frag_point, SCTP_SO_LOCKED);
 	}
+#if defined(__FreeBSD__)
+	NET_EPOCH_EXIT(et);
+#endif
 	SCTPDBG(SCTP_DEBUG_OUTPUT1, "USR Send complete qo:%d prw:%d unsent:%d tf:%d cooq:%d toqs:%d err:%d\n",
 	        queue_only, stcb->asoc.peers_rwnd, un_sent,
 		stcb->asoc.total_flight, stcb->asoc.chunks_on_out_queue,

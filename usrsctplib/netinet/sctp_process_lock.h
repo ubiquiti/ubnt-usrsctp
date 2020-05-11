@@ -86,7 +86,9 @@
 #define SCTP_INP_RLOCK(_inp)
 #define SCTP_INP_RUNLOCK(_inp)
 #define SCTP_INP_WLOCK(_inp)
-#define SCTP_INP_WUNLOCK(_inep)
+#define SCTP_INP_WUNLOCK(_inp)
+#define SCTP_INP_RLOCK_ASSERT(_inp)
+#define SCTP_INP_WLOCK_ASSERT(_inp)
 #define SCTP_INP_INCR_REF(_inp)
 #define SCTP_INP_DECR_REF(_inp)
 
@@ -124,7 +126,7 @@
 	EnterCriticalSection(&SCTP_BASE_INFO(wq_addr_mtx))
 #define SCTP_WQ_ADDR_UNLOCK() \
 	LeaveCriticalSection(&SCTP_BASE_INFO(wq_addr_mtx))
-
+#define SCTP_WQ_ADDR_LOCK_ASSERT()
 
 #define SCTP_INP_INFO_LOCK_INIT() \
 	InitializeCriticalSection(&SCTP_BASE_INFO(ipi_ep_mtx))
@@ -185,6 +187,8 @@
 #define SCTP_INP_WLOCK(_inp) \
 	EnterCriticalSection(&(_inp)->inp_mtx)
 #endif
+#define SCTP_INP_RLOCK_ASSERT(_tcb)
+#define SCTP_INP_WLOCK_ASSERT(_tcb)
 
 #define SCTP_TCB_SEND_LOCK_INIT(_tcb) \
 	InitializeCriticalSection(&(_tcb)->tcb_send_mtx)
@@ -228,32 +232,23 @@
  * extra SOCKBUF_LOCK(&so->so_rcv) even though the association is locked.
  */
 
-#define SCTP_TCB_LOCK_INIT(_tcb) do { \
-	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	InitializeCriticalSection(&(_tcb)->tcb_mtx); \
-}while(0)
-#define SCTP_TCB_LOCK_DESTROY(_tcb) do { \
-	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	DeleteCriticalSection(&(_tcb)->tcb_mtx); \
-} while(0)
+#define SCTP_TCB_LOCK_INIT(_tcb) \
+	InitializeCriticalSection(&(_tcb)->tcb_mtx)
+#define SCTP_TCB_LOCK_DESTROY(_tcb) \
+	DeleteCriticalSection(&(_tcb)->tcb_mtx)
 #ifdef SCTP_LOCK_LOGGING
 #define SCTP_TCB_LOCK(_tcb) do {						\
 	if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LOCK_LOGGING_ENABLE)	\
 		sctp_log_lock(_tcb->sctp_ep, _tcb, SCTP_LOG_LOCK_TCB);		\
 	EnterCriticalSection(&(_tcb)->tcb_mtx);					\
-	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while (0)
 #else
-#define SCTP_TCB_LOCK(_tcb) do { \
-	EnterCriticalSection(&(_tcb)->tcb_mtx); \
-	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
-} while(0)
+#define SCTP_TCB_LOCK(_tcb) \
+	EnterCriticalSection(&(_tcb)->tcb_mtx)
 #endif
-#define SCTP_TCB_TRYLOCK(_tcb) 	(TryEnterCriticalSection(&(_tcb)->tcb_mtx) && (!sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner)))
-#define SCTP_TCB_UNLOCK(_tcb) do { \
-	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	LeaveCriticalSection(&(_tcb)->tcb_mtx); \
-} while(0)
+#define SCTP_TCB_TRYLOCK(_tcb) 	((TryEnterCriticalSection(&(_tcb)->tcb_mtx)))
+#define SCTP_TCB_UNLOCK(_tcb) \
+	LeaveCriticalSection(&(_tcb)->tcb_mtx)
 #define SCTP_TCB_LOCK_ASSERT(_tcb)
 
 #else /* all Userspaces except Windows */
@@ -272,6 +267,8 @@
 #define SCTP_WQ_ADDR_UNLOCK() \
 	(void)pthread_mutex_unlock(&SCTP_BASE_INFO(wq_addr_mtx))
 #endif
+#define SCTP_WQ_ADDR_LOCK_ASSERT() \
+	KASSERT(pthread_mutex_trylock(&SCTP_BASE_INFO(wq_addr_mtx)) == EBUSY, ("%s: wq_addr_mtx not locked", __func__))
 
 #define SCTP_INP_INFO_LOCK_INIT() \
 	(void)pthread_mutex_init(&SCTP_BASE_INFO(ipi_ep_mtx), &SCTP_BASE_VAR(mtx_attr))
@@ -386,6 +383,10 @@
 #define SCTP_INP_WUNLOCK(_inp) \
 	(void)pthread_mutex_unlock(&(_inp)->inp_mtx)
 #endif
+#define SCTP_INP_RLOCK_ASSERT(_inp) \
+	KASSERT(pthread_mutex_trylock(&(_inp)->inp_mtx) == EBUSY, ("%s: inp_mtx not locked", __func__))
+#define SCTP_INP_WLOCK_ASSERT(_inp) \
+	KASSERT(pthread_mutex_trylock(&(_inp)->inp_mtx) == EBUSY, ("%s: inp_mtx not locked", __func__))
 #define SCTP_INP_INCR_REF(_inp) atomic_add_int(&((_inp)->refcount), 1)
 #define SCTP_INP_DECR_REF(_inp) atomic_add_int(&((_inp)->refcount), -1)
 
@@ -444,56 +445,39 @@
  * extra SOCKBUF_LOCK(&so->so_rcv) even though the association is locked.
  */
 
-#define SCTP_TCB_LOCK_INIT(_tcb) do { \
-	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	(void)pthread_mutex_init(&(_tcb)->tcb_mtx, &SCTP_BASE_VAR(mtx_attr)); \
-}while(0)
-#define SCTP_TCB_LOCK_DESTROY(_tcb) do { \
-	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	(void)pthread_mutex_destroy(&(_tcb)->tcb_mtx); \
-} while(0)
+#define SCTP_TCB_LOCK_INIT(_tcb) \
+	(void)pthread_mutex_init(&(_tcb)->tcb_mtx, &SCTP_BASE_VAR(mtx_attr))
+#define SCTP_TCB_LOCK_DESTROY(_tcb) \
+	(void)pthread_mutex_destroy(&(_tcb)->tcb_mtx)
 #ifdef INVARIANTS
 #ifdef SCTP_LOCK_LOGGING
 #define SCTP_TCB_LOCK(_tcb) do {									\
 	if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LOCK_LOGGING_ENABLE) 				\
 		sctp_log_lock(_tcb->sctp_ep, _tcb, SCTP_LOG_LOCK_TCB);					\
 	KASSERT(pthread_mutex_lock(&(_tcb)->tcb_mtx) == 0, ("%s: tcb_mtx already locked", __func__))	\
-	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while (0)
 #else
-#define SCTP_TCB_LOCK(_tcb) do { \
-	KASSERT(pthread_mutex_lock(&(_tcb)->tcb_mtx) == 0, ("%s: tcb_mtx already locked", __func__)) \
-	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
-} while(0)
+#define SCTP_TCB_LOCK(_tcb) \
+	KASSERT(pthread_mutex_lock(&(_tcb)->tcb_mtx) == 0, ("%s: tcb_mtx already locked", __func__))
 #endif
-#define SCTP_TCB_UNLOCK(_tcb) do { \
-	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	KASSERT(pthread_mutex_unlock(&(_tcb)->tcb_mtx) == 0, ("%s: tcb_mtx not locked", __func__)) \
-} while(0)
+#define SCTP_TCB_UNLOCK(_tcb) \
+	KASSERT(pthread_mutex_unlock(&(_tcb)->tcb_mtx) == 0, ("%s: tcb_mtx not locked", __func__))
 #else
 #ifdef SCTP_LOCK_LOGGING
 #define SCTP_TCB_LOCK(_tcb) do {						\
 	if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_LOCK_LOGGING_ENABLE) 	\
 		sctp_log_lock(_tcb->sctp_ep, _tcb, SCTP_LOG_LOCK_TCB);		\
 	(void)pthread_mutex_lock(&(_tcb)->tcb_mtx);				\
-	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
 } while (0)
 #else
-#define SCTP_TCB_LOCK(_tcb) do { \
-	(void)pthread_mutex_lock(&(_tcb)->tcb_mtx); \
-	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
-} while(0)
+#define SCTP_TCB_LOCK(_tcb) \
+	(void)pthread_mutex_lock(&(_tcb)->tcb_mtx)
 #endif
-#define SCTP_TCB_UNLOCK(_tcb) do { \
-	memset(&(_tcb)->tcb_mtx_owner,0,sizeof((_tcb)->tcb_mtx_owner)); \
-	(void)pthread_mutex_unlock(&(_tcb)->tcb_mtx); \
-} while(0)
+#define SCTP_TCB_UNLOCK(_tcb) (void)pthread_mutex_unlock(&(_tcb)->tcb_mtx)
 #endif
-#define SCTP_TCB_LOCK_ASSERT(_tcb) do { \
-	KASSERT(pthread_mutex_trylock(&(_tcb)->tcb_mtx) == EBUSY, ("%s: tcb_mtx not locked", __func__)) \
-	sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner); \
-} while(0)
-#define SCTP_TCB_TRYLOCK(_tcb) ((!pthread_mutex_trylock(&(_tcb)->tcb_mtx)) && (!sctp_userspace_thread_id(&(_tcb)->tcb_mtx_owner)))
+#define SCTP_TCB_LOCK_ASSERT(_tcb) \
+	KASSERT(pthread_mutex_trylock(&(_tcb)->tcb_mtx) == EBUSY, ("%s: tcb_mtx not locked", __func__))
+#define SCTP_TCB_TRYLOCK(_tcb) (!(pthread_mutex_trylock(&(_tcb)->tcb_mtx)))
 #endif
 
 #endif /* SCTP_PER_SOCKET_LOCKING */
