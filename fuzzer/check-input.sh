@@ -18,7 +18,7 @@ echo "########## Beginning Fuzzer Chain"
 echo ""
 
 set +e
-./fuzzer_connect_multi_verbose -timeout=30 $1 > $1.log 2>&1
+./fuzzer_connect_multi_verbose -timeout=10 $1 > $1.log 2>&1
 FUZZER_RETVAL=$?
 set -e
 
@@ -47,8 +47,10 @@ echo "PCAP:  $1.pcapng"
 echo ""
 
 # Open Wireshark if we have an X session
-if [ -z ${DISPLAY+x} ]; then
-	echo "\$DISPLAY unset, skipping wireshark"
-else
-	wireshark $1.pcapng
-fi
+#if [ -z ${DISPLAY+x} ]; then
+	#echo "\$DISPLAY unset, skipping wireshark"
+#else
+	#wireshark $1.pcapng
+#fi
+
+exit $FUZZER_RETVAL

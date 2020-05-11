@@ -56,7 +56,7 @@ add_project_arguments([
 
 # OS-specific settings
 system = host_machine.system()
-if system == 'linux'
+if system in ['linux', 'android']
     add_project_arguments([
         '-D__Userspace_os_Linux',
         '-D_GNU_SOURCE',
@@ -68,10 +68,9 @@ elif system == 'freebsd'
     ] + compiler.get_supported_arguments([
         '-Wno-address-of-packed-member',
     ]), language: 'c')
-elif system == 'darwin'
+elif system in ['darwin', 'ios']
     add_project_arguments([
             '-D__Userspace_os_Darwin',
-            '-U__APPLE__',
             '-D__APPLE_USE_RFC_2292',
         ] + compiler.get_supported_arguments([
             '-Wno-address-of-packed-member',
@@ -159,7 +158,7 @@ have_sin6_len = compiler.has_member('struct sockaddr_in6', 'sin6_len', prefix: p
 if have_sin6_len
     add_project_arguments('-DHAVE_SIN6_LEN', language: 'c')
 endif
-have_sconn_len = compiler.has_member('struct sockaddr_conn', 'sconn_len', prefix: '#include "usrsctp.h"')
+have_sconn_len = compiler.has_member('struct sockaddr_conn', 'sconn_len', prefix: '#include "usrsctp.h"', include_directories: include_directories('usrsctplib'))
 if have_sconn_len
     add_project_arguments('-DHAVE_SCONN_LEN', language: 'c')
 endif
@@ -199,6 +198,7 @@ if compiler.get_id() == 'msvc' and get_option('default_library') == 'shared'
 
     usrsctp = shared_library('usrsctp',
         link_whole: usrsctp_static,
+        dependencies: dependencies,
         vs_module_defs: usrsctp_def,
         install: true,
         version: meson.project_version())
@@ -207,7 +207,8 @@ else
         dependencies: dependencies,
         include_directories: include_dirs,
         install: true,
-        version: meson.project_version())
+        version: meson.project_version(),
+        c_args: '-U__APPLE__')
 endif
 
 # Declare dependency
