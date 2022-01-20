@@ -116,7 +116,7 @@ foreach (source_file ${check_programs})
 
 	target_link_libraries(
 		${source_file_we}
-		"usrsctp"
+		${programs_link_library}
 		${CMAKE_THREAD_LIBS_INIT}
 	)
 endforeach ()

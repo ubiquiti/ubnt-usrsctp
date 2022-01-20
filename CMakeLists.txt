@@ -57,18 +57,24 @@ if (sctp_debug)
 	add_definitions(-DSCTP_DEBUG)
 endif ()
 
+option(sctp_single_thread "Compile the library without threading support" 0)
+if (sctp_single_thread)
+	add_definitions(-DSINGLE_THREAD)
+endif ()
+
 option(sctp_inet "Support IPv4" 1)
-if (sctp_inet)
+if (sctp_inet AND NOT sctp_single_thread)
 	add_definitions(-DINET)
 endif ()
 
 option(sctp_inet6 "Support IPv6" 1)
-if (sctp_inet6)
+if (sctp_inet6 AND NOT sctp_single_thread)
 	add_definitions(-DINET6)
 endif ()
 
 option(sctp_werror "Treat warning as error" 1)
 
+option(sctp_link_programs_static "Link example programs static" 0)
 option(sctp_build_shared_lib "Build USRSCTP as shared library" 0)
 
 option(sctp_build_programs "Build example programs" 1)
@@ -81,6 +87,12 @@ option(sctp_build_fuzzer "Compile in clang fuzzing mode" 0)
 
 if (sctp_sanitizer_address AND sctp_sanitizer_memory)
 	message(FATAL_ERROR "Can not compile with both sanitizer options")
+endif ()
+
+if (sctp_link_programs_static OR WIN32)
+	set(programs_link_library "usrsctp-static")
+else ()
+	set(programs_link_library "usrsctp")
 endif ()
 
 
@@ -253,9 +265,9 @@ elseif (CMAKE_C_COMPILER_ID MATCHES "Clang" OR CMAKE_C_COMPILER_ID MATCHES "Appl
 	endif ()
 
 	if (sctp_build_fuzzer)
-		set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+		set(CMAKE_BUILD_TYPE "DEBUG")
 		add_definitions(-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)
-		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=fuzzer-no-link")
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O1 -fsanitize=fuzzer-no-link")
 	endif ()
 endif ()
 
